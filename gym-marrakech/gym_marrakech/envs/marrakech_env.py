@@ -238,7 +238,7 @@ class MarrakechEnv(gym.Env):
   def stepCarpetAction(self, cPosition, cOrientation):
     reward = 0.
     if carpetPlacementIsInvalid(self.position, cPosition, cOrientation):
-      reward = -100.
+      reward = 0.
     else:
       placeCarpet(self.board, self.position, self.playerNumber, cPosition, cOrientation)
 
