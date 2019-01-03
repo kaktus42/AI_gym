@@ -1,1 +1,1 @@
-from gym_marrakech.envs.marrakech_env import MarrakechEnv
+from .marrakech_env import MarrakechEnv
