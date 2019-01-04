@@ -365,8 +365,12 @@ class MarrakechEnv(gym.Env):
   def render(self, mode='human', close=False, prefix=""):
     if mode == 'ascii':
       return self.renderAscii(prefix=prefix)
+    fig = self.renderImg()
+    if mode == 'rgb_array':
+      fig.canvas.draw()
+      return np.array(fig.canvas.renderer._renderer)
     else:
-      return self.renderImg()
+      return fig
 
   def renderAscii(self, prefix=""):
     buf = io.StringIO()
@@ -415,7 +419,8 @@ class MarrakechEnv(gym.Env):
         info += "ACT Carpet: ({}, {})".format(directionSpaceShort[acCarpetPos], orientationSpaceShort[acCarpetOri])
     info += "\n%s %.1f " % (playerColor[self.getColorAtPosition()], self.lastReward)
     info += ','.join([str(x) for x in self.accounts])
-    plt.text(1, 9*7 + 7, info, fontsize=10)
+    plt.text(3, cellSize*7 + 2*cellSize/3, info, fontsize=10)
+    plt.close()
     return fig
 
 
@@ -424,7 +429,7 @@ from matplotlib import colors
 
 cellSize = 9
 playerSize = int(cellSize/3)
-borders = ((int(cellSize/3), int(cellSize/3)), (int(cellSize + cellSize/3), int(cellSize/3)))
+borders = ((int(cellSize/3), int(1.7*cellSize + cellSize/3)), (int(cellSize/3), int(cellSize/3)))
 playerMask = np.array(
     [1 if x < cellSize/2 and (abs(int(x-(cellSize/2)+0.5))+abs(int(y-(cellSize/2)+0.5))) < cellSize*0.4 else 0 for x in range(cellSize) for y in range(cellSize)]
 ).reshape((cellSize,cellSize))
