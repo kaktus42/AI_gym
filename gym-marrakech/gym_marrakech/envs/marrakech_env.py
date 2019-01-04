@@ -146,7 +146,7 @@ def placeCarpet(board, playerPosition, playerNumber, carpetPosition, orientation
 
 
 class MarrakechEnv(gym.Env):
-  metadata = {'render.modes': ['human']}
+  metadata = {'render.modes': ['human', 'ascii', 'rgb_array']}
   boardSize = (7, 7)
   numPlayers = 4
   numCarpets = 15
@@ -250,6 +250,9 @@ class MarrakechEnv(gym.Env):
     return (reward, {})
 
   def step(self, action):
+    if self.gameIsOver():
+      return (self._getObs(), 0, True, {"error": "Game Over"})
+
     assert self.action_space.contains(action)
 
     acMovement = (action & 0b11) % 3
@@ -401,7 +404,8 @@ class MarrakechEnv(gym.Env):
       for x in range(7):
         color = self.board[x,y]
         drawBlockOnPic(fullPic, x, y, color, self.position, self.facing)
-    fig = plt.figure()
+    fig = plt.figure(figsize=np.array(fullPic.shape)[::-1]/20, frameon=False)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
     plt.axis('off')
     plt.imshow(fullPic, cmap=cmap, norm=norm, aspect='equal', origin='lower')
     #plt.imshow(np.rot90(fullPic), cmap=cmap, norm=norm, aspect='equal')
