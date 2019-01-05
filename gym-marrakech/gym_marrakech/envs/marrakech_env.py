@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import io
 from .InvalidActionException import InvalidActionException
+from .RandomAi import RandomAi
 
 dice = [1, 2, 2, 3, 3, 4]
 
@@ -151,7 +152,7 @@ class MarrakechEnv(gym.Env):
   numPlayers = 4
   numCarpets = 15
 
-  def __init__(self, verbosity=0):
+  def __init__(self, verbosity=0, players=None):
     #self.action_space = spaces.MultiDiscrete([
     #  3, # Movement: Left, Forward, Right
     #  4, # Carpet position: N, E, S, W of figure
@@ -187,6 +188,11 @@ class MarrakechEnv(gym.Env):
       ]),
       dtype=np.uint8
     )
+
+    if not players:
+      self.otherPlayers = [RandomAi(), RandomAi(), RandomAi()]
+    else:
+      raise NotImplementedError("Can't use custom opponents yet.")
 
     self.verbosity = verbosity
     self.seed()
@@ -340,7 +346,7 @@ class MarrakechEnv(gym.Env):
         print("#################")
         print("### PLAYER %d ###" % self.playerNumber)
         print("#################")
-      action = self.action_space.sample()
+      action = self.otherPlayers[self.playerNumber-2].step(self._getObs(), self)
       if self.verbosity & 0b1:
         printAction(action, "#%d# " % self.playerNumber)
       observation, reward, done, info = self.step(action)
@@ -351,7 +357,7 @@ class MarrakechEnv(gym.Env):
 
       if self.verbosity & 0b100:
         self.render(prefix="#%d# " % self.playerNumber)
-      action = self.action_space.sample()
+      action = self.otherPlayers[self.playerNumber-2].step(self._getObs(), self)
       if self.verbosity & 0b1:
         printAction(action, "#%d# " % self.playerNumber)
       observation, reward, done, info = self.step(action)
