@@ -235,9 +235,10 @@ class MarrakechEnv(gym.Env):
     steppedOnColor = self.getColorAtPosition()
     if steppedOnColor > 0 and self.playerNumber != steppedOnColor:
       connectedTiles = len(self.getConnectedCarpetsFromPosition())
-      self.accounts[self.playerNumber-1] -= connectedTiles
-      self.accounts[steppedOnColor-1] += connectedTiles
-      reward -= connectedTiles
+      moneyTransferAmount = min(connectedTiles, self.accounts[self.playerNumber-1])
+      self.accounts[self.playerNumber-1] -= moneyTransferAmount
+      self.accounts[steppedOnColor-1] += moneyTransferAmount
+      reward -= moneyTransferAmount
 
     return (reward, {"numSteps": numSteps})
 
@@ -247,9 +248,6 @@ class MarrakechEnv(gym.Env):
       reward = 0.
     else:
       placeCarpet(self.board, self.position, self.playerNumber, cPosition, cOrientation)
-
-    if self.isPlayersMove:
-      self.round += 1
 
     self.lastNumSteps = 0
 
@@ -281,6 +279,9 @@ class MarrakechEnv(gym.Env):
           self.isPlayersMove = True
           self.playerNumber = 1
         self.lastReward = reward
+        
+        if self.isPlayersMove:
+          self.round += 1
       else:
         reward, info = self.stepMoveAction(acMovement)
         self.lastReward = reward
@@ -340,6 +341,8 @@ class MarrakechEnv(gym.Env):
   def makePlayersSteps(self):
     totalReturnedReward = 0
     for self.playerNumber in np.arange(2, MarrakechEnv.numPlayers + 1):
+      if self.accounts[self.playerNumber-1] <= 0:
+        continue
       if self.verbosity & 0b100:
         self.render(prefix="#%d# " % self.playerNumber)
       if self.verbosity & 0b1:
@@ -369,7 +372,7 @@ class MarrakechEnv(gym.Env):
     return totalReturnedReward
 
   def gameIsOver(self):
-    return self.round >= MarrakechEnv.numCarpets
+    return self.round >= MarrakechEnv.numCarpets or self.accounts[0] <= 0
 
   def render(self, mode='human', close=False, prefix=""):
     if mode == 'ascii':
