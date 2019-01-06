@@ -33,7 +33,7 @@ def isOdd(num):
   return num & 0x1
 
 # TODO: make for flexible board sizes
-def goStep(position, facing):
+def walkStep(position, facing):
   # left edge + go left
   if position[0] == 0 and facing == 3:
     if position[1] == 0:
@@ -136,13 +136,13 @@ def carpetPlacementIsInvalid(playerPosition, carpetPosition, orientation):
   return False
 
 
-def placeCarpet(board, playerPosition, playerNumber, carpetPosition, orientation):
+def placeCarpet(board, playerPosition, color, carpetPosition, orientation):
   anchorPoint = playerPosition.copy()
   goNormalStep(anchorPoint, carpetPosition)
-  board[tuple(anchorPoint)] = playerNumber
+  board[tuple(anchorPoint)] = color
   orientation = (carpetPosition + (orientation - 1)) % 4
   goNormalStep(anchorPoint, orientation)
-  board[tuple(anchorPoint)] = playerNumber
+  board[tuple(anchorPoint)] = color
 
 
 
@@ -212,97 +212,125 @@ class MarrakechEnv(gym.Env):
     self.round = 0
     self.phase = 0
     self.accounts = [30, 30, 30, 30]
-    self.lastAction = -1
+    self.currentAction = -1
     self.isPlayersMove = True
-    self.playerNumber = 1
+    self.currentPlayer = 0
     self.lastNumSteps = 0
     self.lastReward = 0.
     return self._getObs()
 
-  def stepMoveAction(self, direction):
+  def step(self, action):
+    """
+    if phase = move:
+      use action to turn
+      move x steps
+      pay money
+      if bankrupt:
+        exit game
+        done = True
+    elif phase = carpet:
+      lay carpet
+
+    update counters
+    if currentPlayer != 0:
+      call other player to act
+    """
+    if self.verbosity & 0b100: print("do step for {} - {} {}".format(self.currentPlayer, self.round, self.phase))
+    assert self.action_space.contains(action)
+
+    if self.gameIsOver():
+      return (self._getObs(), 0, True, {"error": "Game Over"})
+
+    acMovement, acCarpetPos, acCarpetOri = self._splitAction(action)
+    self.currentAction = action
+
+    reward = 0.
+    info = {}
+    if self.phase:
+      reward, info = self._stepCarpetAction(acCarpetPos, acCarpetOri)
+      self.currentPlayer += 1
+    else:
+      rewards, info = self._stepMoveAction(acMovement)
+      reward = rewards[self.currentPlayer]
+
+    self.phase = 0 if self.phase else 1
+    if self.currentPlayer >= MarrakechEnv.numPlayers:
+      self.currentPlayer = 0
+      self.round += 1
+
+    if self.isPlayersMove:
+      self.lastBalance = self.accounts[0]
+      self.isPlayersMove = False
+      while self.currentPlayer != 0:
+        self._triggerOtherPlayer()
+      self.isPlayersMove = True
+      reward += self.accounts[0] - self.lastBalance
+
+    return (
+      self._getObs()
+      , reward
+      , self.gameIsOver()
+      , info
+    )
+
+  def _splitAction(self, action):
+    acMovement = (action & 0b11) % 3
+    acCarpetPos = ((action >> 2) & 0b11) % 4
+    acCarpetOri = ((action >> 4) & 0b11) % 3
+    return (acMovement, acCarpetPos, acCarpetOri)
+
+  def _stepMoveAction(self, direction):
     # turn
     self.facing = (self.facing + (direction - 1)) % 4
 
-    # move n steps
+    # move x steps
     leftSteps = numSteps = rollDie(self.np_random)
     while leftSteps:
-      self.position, self.facing = goStep(self.position, self.facing)
+      self.position, self.facing = walkStep(self.position, self.facing)
       leftSteps -= 1
 
     self.lastNumSteps = numSteps
 
-    reward = 0.
-    steppedOnColor = self.getColorAtPosition()
-    if steppedOnColor > 0 and self.playerNumber != steppedOnColor:
-      connectedTiles = len(self.getConnectedCarpetsFromPosition())
-      moneyTransferAmount = min(connectedTiles, self.accounts[self.playerNumber-1])
-      self.accounts[self.playerNumber-1] -= moneyTransferAmount
-      self.accounts[steppedOnColor-1] += moneyTransferAmount
-      reward -= moneyTransferAmount
+    # pay money
+    rewards = [0., 0., 0., 0.]
+    steppedColor = self._getColorAtPosition()
+    steppedPlayer = steppedColor - 1
+    if steppedColor > 0 and self.currentPlayer != steppedPlayer:
+      connectedTiles = len(self._getConnectedCarpetsFromPosition())
+      moneyTransferAmount = min(connectedTiles, self.accounts[self.currentPlayer])
+      self.accounts[self.currentPlayer] -= moneyTransferAmount
+      self.accounts[steppedPlayer] += moneyTransferAmount
+      rewards[self.currentPlayer] -= moneyTransferAmount
+      rewards[steppedPlayer] += moneyTransferAmount
 
-    return (reward, {"numSteps": numSteps})
+    return (rewards, {"numSteps": numSteps})
 
-  def stepCarpetAction(self, cPosition, cOrientation):
+  def _getColorAtPosition(self):
+    return self.board[tuple(self.position)]
+
+  def _getConnectedCarpetsFromPosition(self):
+    colorAtPos = self._getColorAtPosition()
+    newFields = set([tuple(self.position)])
+    fields = set()
+    while fields != newFields:
+      fields = newFields.copy()
+      for f in fields:
+        for o in [(1,0), (-1,0), (0,1), (0,-1)]:
+          testPos = (f[0] + o[0], f[1] + o[1])
+          try:
+            if colorAtPos == self.board[testPos]:
+              newFields.add(testPos)
+          except IndexError:
+            pass
+    return newFields
+
+  def _stepCarpetAction(self, cPosition, cOrientation):
     reward = 0.
     if carpetPlacementIsInvalid(self.position, cPosition, cOrientation):
       reward = 0.
     else:
-      placeCarpet(self.board, self.position, self.playerNumber, cPosition, cOrientation)
-
-    self.lastNumSteps = 0
-
+      placeCarpet(self.board, self.position, self.currentPlayer + 1, cPosition, cOrientation)
     return (reward, {})
-
-  def step(self, action):
-    if self.gameIsOver():
-      return (self._getObs(), 0, True, {"error": "Game Over"})
-
-    assert self.action_space.contains(action)
-
-    acMovement = (action & 0b11) % 3
-    acCarpetPos = ((action >> 2) & 0b11) % 4
-    acCarpetOri = ((action >> 4) & 0b11) % 3
-    self.lastAction = action
-
-    backupObservation = self._getObs()
-
-    result = (None, None, None, {"error": "Invalid Action"})
-    try:
-      if self.phase:
-        reward, info = self.stepCarpetAction(acCarpetPos, acCarpetOri)
-        self.lastReward = reward
-        self.phase = 0
-
-        if self.isPlayersMove:
-          self.isPlayersMove = False
-          reward += self.makePlayersSteps()
-          self.isPlayersMove = True
-          self.playerNumber = 1
-        self.lastReward = reward
-        
-        if self.isPlayersMove:
-          self.round += 1
-      else:
-        reward, info = self.stepMoveAction(acMovement)
-        self.lastReward = reward
-        self.phase = 1
-
-      result = (
-        self._getObs()
-        , reward
-        , self.gameIsOver()
-        , info
-      )
-    except InvalidActionException:
-      result = (
-        backupObservation
-        , -100.
-        , self.gameIsOver()
-        , {"error": "Invalid Action"}
-      )
-      pass
-
-    return result
 
   def _getObs(self):
     return np.concatenate([
@@ -311,65 +339,14 @@ class MarrakechEnv(gym.Env):
       np.array([self.facing, self.phase, self.round])
     ])
 
-  def getColorAtPosition(self):
-    return self.board[tuple(self.position)]
+  def _triggerOtherPlayer(self):
+    if self.verbosity & 0b10:
+      display(self.render())
 
-  def getConnectedCarpetsFromPosition(self):
-    colorAtPos = self.getColorAtPosition()
-    newFields = set([tuple(self.position)])
-    fields = set()
-
-    while fields != newFields:
-        fields = newFields.copy()
-        for f in fields:
-            for o in [(1,0), (-1,0), (0,1), (0,-1)]:
-                testPos = (f[0] + o[0], f[1] + o[1])
-                try:
-                    if colorAtPos == self.board[testPos]:
-                        newFields.add(testPos)
-                except IndexError:
-                    pass
-    return newFields
-
-  def _revertAction(self, backupObservation):
-    self.board = backupObservation["board"]
-    self.position = backupObservation["position"]
-    self.facing = backupObservation["facing"]
-    self.phase = backupObservation["phase"]
-    self.round = backupObservation["round"]
-
-  def makePlayersSteps(self):
-    totalReturnedReward = 0
-    for self.playerNumber in np.arange(2, MarrakechEnv.numPlayers + 1):
-      if self.accounts[self.playerNumber-1] <= 0:
-        continue
-      if self.verbosity & 0b100:
-        self.render(prefix="#%d# " % self.playerNumber)
-      if self.verbosity & 0b1:
-        print("#################")
-        print("### PLAYER %d ###" % self.playerNumber)
-        print("#################")
-      action = self.otherPlayers[self.playerNumber-2].step(self._getObs(), self)
-      if self.verbosity & 0b1:
-        printAction(action, "#%d# " % self.playerNumber)
-      observation, reward, done, info = self.step(action)
-      if self.getColorAtPosition() == 1:
-        totalReturnedReward = -reward
-      if self.verbosity & 0b1:
-        print("#%d# %d steps, %.1f reward" % (self.playerNumber, info["numSteps"], reward))
-
-      if self.verbosity & 0b100:
-        self.render(prefix="#%d# " % self.playerNumber)
-      action = self.otherPlayers[self.playerNumber-2].step(self._getObs(), self)
-      if self.verbosity & 0b1:
-        printAction(action, "#%d# " % self.playerNumber)
-      observation, reward, done, info = self.step(action)
-      if self.verbosity & 0b1:
-        print("#%d# %.1f reward" % (self.playerNumber, reward))
-      if self.verbosity & 0b10:
-        self.render(prefix="#%d# " % self.playerNumber)
-
-    return totalReturnedReward
+    otherPlayer = self.otherPlayers[self.currentPlayer-1]
+    action = otherPlayer.requestAction(self)
+    observation, reward, done, info = self.step(action)
+    acMovement, acCarpetPos, acCarpetOri = self._splitAction(action)
 
   def gameIsOver(self):
     return self.round >= MarrakechEnv.numCarpets or self.accounts[0] <= 0
@@ -419,18 +396,18 @@ class MarrakechEnv(gym.Env):
     plt.imshow(fullPic, cmap=cmap, norm=norm, aspect='equal', origin='lower')
     #plt.imshow(np.rot90(fullPic), cmap=cmap, norm=norm, aspect='equal')
 
-    action = self.lastAction
+    action = self.currentAction
     acMovement = (action & 0b11) % 3
     acCarpetPos = ((action >> 2) & 0b11) % 4
     acCarpetOri = ((action >> 4) & 0b11) % 3
 
-    info = "round %d  player %d phase %d\n" % (self.round, self.playerNumber, self.phase)
-    if self.lastAction >= 0:
+    info = "round %d  player %d phase %d\n" % (self.round, self.currentPlayer, self.phase)
+    if self.currentAction >= 0:
       if self.phase: # inverse, because phase change already happened
-        info += "ACT Move: {} steps {}".format(self.lastNumSteps, orientationSpaceShort[acMovement])
+        info += "last ACT - Move: {} steps {}".format(self.lastNumSteps, orientationSpaceShort[acMovement])
       else:
-        info += "ACT Carpet: ({}, {})".format(directionSpaceShort[acCarpetPos], orientationSpaceShort[acCarpetOri])
-    info += "\n%s %.1f " % (playerColor[self.getColorAtPosition()], self.lastReward)
+        info += "last ACT - Carpet: ({}, {})".format(directionSpaceShort[acCarpetPos], orientationSpaceShort[acCarpetOri])
+    info += "\n%s %.1f " % (playerColor[self._getColorAtPosition()], self.lastReward)
     info += ','.join([str(x) for x in self.accounts])
     plt.text(3, cellSize*7 + 2*cellSize/3, info, fontsize=10)
     plt.close()

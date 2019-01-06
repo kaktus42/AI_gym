@@ -1,7 +1,7 @@
 from numpy import random
 
 class RandomAi(object):
-  def step(self, observation, env):
+  def requestAction(self, env):
     try:
       return random.choice(env.getValidActions())
     except AttributeError:
