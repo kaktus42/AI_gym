@@ -170,21 +170,21 @@ class MarrakechEnv(gym.Env):
     # x = Carpet orientation (0-2)
     # y = Carpet position (0-3)
     # z = Movement (0-2)
-    self.action_space = spaces.Discrete(47)
+    self.action_space = spaces.Discrete(3)
 
     # merged together all information into a single vector
     # "board"    N x M flattened
     # "position" X, Y coordinate
     # "facing"   N, E, S, W
-    # "phase"    0 = move, 1 = lay down carpet
+    # "phase"    0 = move, 1 = lay down carpet (removed)
     # "round"    every player has 15 carpets
     boardCells = MarrakechEnv.boardSize[0] * MarrakechEnv.boardSize[1]
     self.observation_space = spaces.Box(
-      low = np.zeros(boardCells + 2 + 1 + 1 + 1),
+      low = np.zeros(boardCells + 2 + 1 + 0 + 1),
       high = np.concatenate([
         np.ones(boardCells) * MarrakechEnv.numPlayers,
         np.array(MarrakechEnv.boardSize) - 1,
-        np.array([3, 1, 14])
+        np.array([3, 14])
       ]),
       dtype=np.uint8
     )
@@ -241,19 +241,22 @@ class MarrakechEnv(gym.Env):
     if self.gameIsOver():
       return (self._getObs(), 0, True, {"error": "Game Over"})
 
-    acMovement, acCarpetPos, acCarpetOri = self._splitAction(action)
+    acMovement = action
     self.currentAction = action
 
     reward = 0.
     info = {}
-    if self.phase:
-      reward, info = self._stepCarpetAction(acCarpetPos, acCarpetOri)
-      self.currentPlayer += 1
-    else:
-      rewards, info = self._stepMoveAction(acMovement)
-      reward = rewards[self.currentPlayer]
 
-    self.phase = 0 if self.phase else 1
+    rewards, info = self._stepMoveAction(acMovement)
+    reward = rewards[self.currentPlayer]
+
+
+    acCarpetPos = self.np_random.randint(4)
+    acCarpetOri = self.np_random.randint(3)
+    #print("carpet (%d %d)" % (acCarpetPos, acCarpetOri))
+    self._stepCarpetAction(acCarpetPos, acCarpetOri)
+    self.currentPlayer += 1
+
     if self.currentPlayer >= MarrakechEnv.numPlayers:
       self.currentPlayer = 0
       self.round += 1
@@ -262,7 +265,9 @@ class MarrakechEnv(gym.Env):
       self.lastBalance = self.accounts[0]
       self.isPlayersMove = False
       while self.currentPlayer != 0:
-        self._triggerOtherPlayer()
+        #print("self._triggerOtherPlayer()")
+        if self._triggerOtherPlayer():
+          break
       self.isPlayersMove = True
       reward += self.accounts[0] - self.lastBalance
 
@@ -285,6 +290,7 @@ class MarrakechEnv(gym.Env):
 
     # move x steps
     leftSteps = numSteps = rollDie(self.np_random)
+    #print("numsteps " + str(numSteps))
     while leftSteps:
       self.position, self.facing = walkStep(self.position, self.facing)
       leftSteps -= 1
@@ -336,7 +342,7 @@ class MarrakechEnv(gym.Env):
     return np.concatenate([
       self.board.flatten(),
       self.position,
-      np.array([self.facing, self.phase, self.round])
+      np.array([self.facing, self.round])
     ])
 
   def _triggerOtherPlayer(self):
@@ -345,8 +351,10 @@ class MarrakechEnv(gym.Env):
 
     otherPlayer = self.otherPlayers[self.currentPlayer-1]
     action = otherPlayer.requestAction(self)
+    #print("other player: move " + str(action))
     observation, reward, done, info = self.step(action)
-    acMovement, acCarpetPos, acCarpetOri = self._splitAction(action)
+
+    return done
 
   def gameIsOver(self):
     return self.round >= MarrakechEnv.numCarpets or self.accounts[0] <= 0
