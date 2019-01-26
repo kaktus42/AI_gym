@@ -149,7 +149,7 @@ def placeCarpet(board, playerPosition, color, carpetPosition, orientation):
 class MarrakechEnv(gym.Env):
   metadata = {'render.modes': ['human', 'ascii', 'rgb_array']}
   boardSize = (7, 7)
-  numPlayers = 4
+  numPlayers = 2
   numCarpets = 15
 
   def __init__(self, verbosity=0, players=None):
